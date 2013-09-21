@@ -167,6 +167,7 @@ for index = 1 : NumBuses
     end
 end
 
+% Fill unknowns matrix
 Unknowns(1,:) = Pg_unknown;
 Unknowns(2,:) = Qg_unknown;
 Unknowns(3,:) = Pd_unknown;
@@ -174,6 +175,50 @@ Unknowns(4,:) = Qd_unknown;
 Unknowns(5,:) = V_unknown;
 Unknowns(6,:) = delta_unknown;
 
+% Constant Definitions for easy access
+ROW_Pg    = 1;
+ROW_Qg    = 2;
+ROW_Pd    = 3;
+ROW_Qd    = 4;
+ROW_V     = 5;
+ROW_delta = 6;
+BUSTYPE_Ref = 0;
+BUSTYPE_Ctrl = 1;
+BUSTYPE_Load = 2;
+
+% Identify bus types
+BusTypes = zeros(1, NumBuses);
+
+for index = 1 : NumBuses
+    if ((Unknowns(ROW_Pg, index) == 1) && (Unknowns(ROW_Qg, index) == 1))
+        BusTypes(index) = BUSTYPE_Ref;
+    elseif ((Unknowns(ROW_Qg, index) == 1) && (Unknowns(ROW_delta, index) == 1))
+        BusTypes(index) = BUSTYPE_Ctrl;
+    else
+        BusTypes(index) = BUSTYPE_Load;
+    end
+end
+
+% Make initial guesses for Vi
+for index = 2 : NumBuses
+    if Unknowns(ROW_V, index) == 1
+        V_pu(index) = V_pu(1) * 0.9;
+    end
+end
+
+% Make initial guesses for delta
+for index = 2 : NumBuses
+    if Unknowns(ROW_delta, index) == 1
+        delta_rad(index) = 0;
+    end
+end
+
+% Calculate inital Qg for Control Buses
+
+
+%[AngleRad, Mag] = cart2pol(real(Ybus(1,1)), imag(Ybus(1,1)));
+%AngleDegrees = AngleRad * 360 / (2 * pi);
+%[Real, Imag] = pol2cart(AngleRad, Mag);
 
 
 % Output onto screen
@@ -291,11 +336,26 @@ disp(' ');
 disp('Unknowns = ');
 disp(num2str(Unknowns));
 disp(' ');
+disp('Bus Types = ');
+disp(num2str(BusTypes));
+disp(' ');
+disp('V_pu with Initial Guesses');
+disp(num2str(V_pu));
+disp(' ');
+disp('delta_rad with Initial Guesses');
+disp(num2str(delta_rad));
+
+%disp(' ');
+%disp('Ybus(1,1) magnitude');
+%disp(num2str(Mag));
+%disp('Ybus(1,1) angle radians');
+%disp(num2str(AngleRad));
+%disp('Ybus(1,1) angle degrees');
+%disp(num2str(AngleDegrees));
+
+disp(' ');
 disp('XXXXXXXXXXX');
 %disp(num2str());
+
 disp(' ');
 disp('Program End');
-
-% polar and rectangular conversions
-% [Real, Imag] = pol2cart(pi/5, 1);
-% [Angle, Mag] = cart2pol(Real, Imag);
