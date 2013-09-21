@@ -1,3 +1,4 @@
+%% Header Section
 % Joshua Hartwig, Christine Martin, Nan XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 % Computational Methods of Power Systems
 % Power Flow Analysis
@@ -7,6 +8,8 @@
 % This program assumes the three conductors are at equal height and 
 % equally spaced.
 
+function PowerFlowAnalysis()
+%% Input Section
 %%%%%%%%%%%%% INPUT SECTION %%%%%%%%%%%%%
 % Set characteristics of the line in terms of ohms and meters
 LineRadius = 0.015189;      % radius of conductors in meters
@@ -33,6 +36,8 @@ Qd    = [0,        220,    195,    120,    205];   % Qd in MVAR
 V_mag = [400,      395,    99999,  99999,  99999]; % V magnitude in kV
 delta = [0,        99999,  99999,  99999,  99999]; % Voltage angle in degrees
 %%%%%%%%%%%%% END INPUT SECTION %%%%%%%%%%%%%
+
+%% Ybus Calculations
 
 % This program will read in a csv file containing an incidence matrix.
 % The first row must be the names of the branches in order of the incidence
@@ -98,6 +103,13 @@ Ybranch = diag(YbranchVector);
 
 % Create bus admittance matrix Ybus
 Ybus = IncidenceMatrix * Ybranch * IncidenceMatrix';
+
+% Output Ybus Calculations onto screen
+displayYbusCalcs();
+
+
+
+%% Initializations for Gauss Seidel
 
 % Convert inputs into per unit and radians
 % Simultaneously find unknowns
@@ -199,14 +211,17 @@ for index = 1 : NumBuses
     end
 end
 
-% Make initial guesses for Vi
+% Output initial conditions onto screen
+displayInitialConditions();
+
+% Make initial guesses for unknown Vi for all buses
 for index = 2 : NumBuses
     if Unknowns(ROW_V, index) == 1
         V_pu(index) = V_pu(1) * 0.9;
     end
 end
 
-% Make initial guesses for delta
+% Make initial guesses for unknonw delta for all buses
 for index = 2 : NumBuses
     if Unknowns(ROW_delta, index) == 1
         delta_rad(index) = 0;
@@ -214,148 +229,327 @@ for index = 2 : NumBuses
 end
 
 % Calculate inital Qg for Control Buses
+SummationTerm = 0;
 
+for index = 2 : NumBuses
+    if BusTypes(index) == BUSTYPE_Ctrl
+        for k = 1 : NumBuses
+            [AngleRad, Mag] = cart2pol(real(Ybus(index, k)), imag(Ybus(index, k)));
+            gamma_current = AngleRad;
+            SummationTerm = SummationTerm + Ybus(index, k) * V_pu(k) * sin(delta_rad(k) - delta_rad(index) + gamma_current);
+        end
+        
+        [Real_V, Imag_V] = pol2cart(delta_rad(index), V_pu(index));
+        Qg_pu(index) = -(Real_V + Imag_V) * SummationTerm;
+    end
+end
+
+% Output Initial Guesses onto screen
+displayInitialGuesses();
+
+
+
+%% Gauss Seidel
+
+BusConverged = 1;
+BusNotConverged = 0;
+
+ConvergenceStatus = zeros(1, NumBuses);
+ConvergenceStatus(1) = BusConverged;
+
+iterCount = 1;
+ConvergenceComplete = false;
+
+while (~ConvergenceComplete)
+    % Calculating values for next iteration
+    for busIndex = 2 : NumBuses
+        if (~ConvergenceStatus(busIndex))
+            Pbus = Pg_pu(busIndex) - Pd_pu(busIndex);
+            Qbus = Qg_pu(busIndex) - Qd_pu(busIndex);
+            y_term = 1 / Ybus(busIndex, busIndex);
+            
+            %%% Control Bus Calculations
+            if (BusTypes(busIndex) == BUSTYPE_Ctrl)
+                %%% Calculate delta_rad(u+1)
+                [Real_V, Imag_V] = pol2cart(delta_rad(busIndex), V_pu(busIndex));
+                Current_V_phasor = Real_V + Imag_V;
+                
+                % Calculate Summation Term
+                SummationTerm = 0;
+                for k = 1 : NumBuses
+                    if (k ~= busIndex)
+                        [Real_V, Imag_V] = pol2cart(delta_rad(k), V_pu(k));
+                        OtherBus_V_phasor = Real_V + Imag_V;
+                        SummationTerm = SummationTerm + Ybus(busIndex, k) * OtherBus_V_phasor;
+                    end
+                end
+                
+                new_V_phasor = y_term * ((Pbus - 1i * Qbus) / conj(Current_V_phasor) - SummationTerm);
+                [AngleRad, Mag] = cart2pol(real(new_V_phasor), imag(new_V_phasor));
+                last_delta_rad = delta_rad(busIndex);
+                delta_rad(busIndex) = AngleRad;
+                
+                DELTA_delta = last_delta_rad - delta_rad(busIndex);
+                
+                %%% Calculate Q(u+1)
+                % Calculate Summation Term
+                SummationTerm = 0;
+                for k = 1 : NumBuses
+                    [AngleRad, Mag] = cart2pol(real(Ybus(busIndex, k)), imag(Ybus(busIndex, k)));
+                    gamma_current = AngleRad;
+                    SummationTerm = SummationTerm + Ybus(busIndex, k) * V_pu(k) * sin(delta_rad(k) - delta_rad(busIndex) + gamma_current);
+                end
+                
+                [Real_V, Imag_V] = pol2cart(delta_rad(busIndex), V_pu(busIndex));
+                last_Qg = Qg_pu(busIndex);
+                Qg_pu(busIndex) = -(Real_V + Imag_V) * SummationTerm;
+                
+                DELTA_Qg = last_Qg - Qg_pu(busIndex);
+                
+                %%% Check Convergence Complete on current bus
+                if ((abs(DELTA_delta) <= 0.001) && (abs(DELTA_Qg) <= 0.001))
+                    ConvergenceStatus(busIndex) = BusConverged;
+                end
+                
+                % End Control Bus calculations
+                
+            %%% Load Bus Calculations
+            elseif (BusTypes(busIndex) == BUSTYPE_Load)
+                %%% Calculate V(u+1) and delta_rad(u+1) simultaneously
+                [Real_V, Imag_V] = pol2cart(delta_rad(busIndex), V_pu(busIndex));
+                Current_V_phasor = Real_V + Imag_V;
+                
+                % Calculate Summation Term
+                SummationTerm = 0;
+                for k = 1 : NumBuses
+                    if (k ~= busIndex)
+                        [Real_V, Imag_V] = pol2cart(delta_rad(k), V_pu(k));
+                        OtherBus_V_phasor = Real_V + Imag_V;
+                        SummationTerm = SummationTerm + Ybus(busIndex, k) * OtherBus_V_phasor;
+                    end
+                end
+                
+                new_V_phasor = y_term * ((Pbus - 1i * Qbus) / conj(Current_V_phasor) - SummationTerm);
+                [AngleRad, Mag] = cart2pol(real(new_V_phasor), imag(new_V_phasor));
+                last_V = V_pu(busIndex);
+                V_pu(busIndex) = Mag;
+                last_delta_rad = delta_rad(busIndex);
+                delta_rad(busIndex) = AngleRad;
+                
+                DELTA_V = last_V - V_pu(busIndex);
+                DELTA_delta = last_delta_rad - delta_rad(busIndex);
+                
+                if ((abs(DELTA_V) <= 0.001) && (abs(DELTA_delta) <= 0.001))
+                    ConvergenceStatus(busIndex) = BusConverged;
+                end
+
+                % End Load Bus calculations
+                
+            end
+        end
+    end
+    
+    % Check if final iteration complete
+    ConvergenceComplete = true;
+    for convergeCounter = 1 : NumBuses
+        if (ConvergenceStatus(convergeCounter) == BusNotConverged)
+            ConvergenceComplete = false;
+        end
+    end
+    
+    if ~ConvergenceComplete
+        iterCount = iterCount + 1;
+    end
+end
+
+disp(' ');
+disp('Number of Iterations to convergence');
+disp(num2str(iterCount));
+disp(' ');
+disp('Qg_pu approximations');
+disp(num2str(Qg_pu));
+disp(' ');
+disp('V_pu approximations');
+disp(num2str(V_pu));
+disp(' ');
+disp('delta_rad approximations');
+disp(num2str(delta_rad));
 
 %[AngleRad, Mag] = cart2pol(real(Ybus(1,1)), imag(Ybus(1,1)));
 %AngleDegrees = AngleRad * 360 / (2 * pi);
 %[Real, Imag] = pol2cart(AngleRad, Mag);
 
 
-% Output onto screen
-disp('Line radius');
-disp(num2str(LineRadius));
-disp(' ');
-disp('Distance between conductors');
-disp(num2str(D_betCond));
-disp(' ');
-disp('Height to Ground');
-disp(num2str(H_toGround));
-disp(' ');
-disp('Rl = ');
-disp(num2str(Rl));
-disp(' ');
-disp('Number of buses = ');
-disp(num2str(NumBuses));
-disp(' ');
-disp('Bus Distances');
-disp(num2str(BusDistances));
-disp(' ');
-disp('Deq');
-disp(num2str(Deq));
-disp(' ');
-disp('Radius eq');
-disp(num2str(Radeq));
-disp(' ');
-disp('L = ');
-disp(num2str(L));
-disp(' ');
-disp('Omega = ');
-disp(num2str(Omega));
-disp(' ');
-disp('Xl = ');
-disp(num2str(Xl));
-disp(' ');
-disp('Zl = ');
-disp(num2str(Zl));
-disp(' ');
-disp('Epsilon0 = ');
-disp(num2str(Epsilon0));
-disp(' ');
-disp('Height to conductor reflections = ');
-disp(num2str(HToReflection));
-disp(' ');
-disp('H12 = ');
-disp(num2str(H12));
-disp(' ');
-disp('H23 = ');
-disp(num2str(H23));
-disp(' ');
-disp('H31 = ');
-disp(num2str(H31));
-disp(' ');
-disp('Cn = ');
-disp(num2str(Cn));
-disp(' ');
-disp('Yl = ');
-disp(num2str(Yl));
-disp(' ');
-disp('Gamma = ');
-disp(num2str(Gamma));
-disp(' ');
-disp('Incidence Matrix = ');
-disp(num2str(IncidenceMatrix));
-disp(' ');
-disp('Yp and Ys = ');
-disp(num2str(YpYsMat));
-disp(' ');
-disp('YbranchVector = ');
-disp(num2str(YbranchVector));
-disp(' ');
-disp('Ybranch = ');
-disp(num2str(Ybranch));
-disp(' ');
-disp('Ybus = ');
-disp(num2str(Ybus));
-disp(' ');
-disp('Pg Original = ');
-disp(num2str(Pg));
-disp(' ');
-disp('Qg Original = ');
-disp(num2str(Qg));
-disp(' ');
-disp('Pd Original = ');
-disp(num2str(Pd));
-disp(' ');
-disp('Qd Original = ');
-disp(num2str(Qd));
-disp(' ');
-disp('V original = ');
-disp(num2str(V_mag));
-disp(' ');
-disp('Delta in degrees Original = ');
-disp(num2str(delta));
-disp(' ');
-disp('Pg_pu = ');
-disp(num2str(Pg_pu));
-disp(' ');
-disp('Qg_pu = ');
-disp(num2str(Qg_pu));
-disp(' ');
-disp('Pd_pu = ');
-disp(num2str(Pd_pu));
-disp(' ');
-disp('Qd_pu = ');
-disp(num2str(Qd_pu));
-disp(' ');
-disp('V_pu = ');
-disp(num2str(V_pu));
-disp(' ');
-disp('Delta in radians = ');
-disp(num2str(delta_rad));
-disp(' ');
-disp('Unknowns = ');
-disp(num2str(Unknowns));
-disp(' ');
-disp('Bus Types = ');
-disp(num2str(BusTypes));
-disp(' ');
-disp('V_pu with Initial Guesses');
-disp(num2str(V_pu));
-disp(' ');
-disp('delta_rad with Initial Guesses');
-disp(num2str(delta_rad));
 
-%disp(' ');
-%disp('Ybus(1,1) magnitude');
-%disp(num2str(Mag));
-%disp('Ybus(1,1) angle radians');
-%disp(num2str(AngleRad));
-%disp('Ybus(1,1) angle degrees');
-%disp(num2str(AngleDegrees));
+
+
 
 disp(' ');
 disp('XXXXXXXXXXX');
 %disp(num2str());
 
-disp(' ');
 disp('Program End');
+
+%% Display Functions
+
+    function displayYbusCalcs()
+        disp('**********************************************************');
+        disp('******************Ybus Calculations***********************');
+        disp('**********************************************************');
+        disp('Line radius');
+        disp(num2str(LineRadius));
+        disp(' ');
+        disp('Distance between conductors');
+        disp(num2str(D_betCond));
+        disp(' ');
+        disp('Height to Ground');
+        disp(num2str(H_toGround));
+        disp(' ');
+        disp('Rl = ');
+        disp(num2str(Rl));
+        disp(' ');
+        disp('Number of buses = ');
+        disp(num2str(NumBuses));
+        disp(' ');
+        disp('Bus Distances');
+        disp(num2str(BusDistances));
+        disp(' ');
+        disp('Deq');
+        disp(num2str(Deq));
+        disp(' ');
+        disp('Radius eq');
+        disp(num2str(Radeq));
+        disp(' ');
+        disp('L = ');
+        disp(num2str(L));
+        disp(' ');
+        disp('Omega = ');
+        disp(num2str(Omega));
+        disp(' ');
+        disp('Xl = ');
+        disp(num2str(Xl));
+        disp(' ');
+        disp('Zl = ');
+        disp(num2str(Zl));
+        disp(' ');
+        disp('Epsilon0 = ');
+        disp(num2str(Epsilon0));
+        disp(' ');
+        disp('Height to conductor reflections = ');
+        disp(num2str(HToReflection));
+        disp(' ');
+        disp('H12 = ');
+        disp(num2str(H12));
+        disp(' ');
+        disp('H23 = ');
+        disp(num2str(H23));
+        disp(' ');
+        disp('H31 = ');
+        disp(num2str(H31));
+        disp(' ');
+        disp('Cn = ');
+        disp(num2str(Cn));
+        disp(' ');
+        disp('Yl = ');
+        disp(num2str(Yl));
+        disp(' ');
+        disp('Gamma = ');
+        disp(num2str(Gamma));
+        disp(' ');
+        disp('Incidence Matrix = ');
+        disp(num2str(IncidenceMatrix));
+        disp(' ');
+        disp('Yp and Ys = ');
+        disp(num2str(YpYsMat));
+        disp(' ');
+        disp('YbranchVector = ');
+        disp(num2str(YbranchVector));
+        disp(' ');
+        disp('Ybranch = ');
+        disp(num2str(Ybranch));
+        disp(' ');
+        disp('Ybus = ');
+        disp(num2str(Ybus));
+        disp(' ');
+        disp('**********************************************************');
+        disp('****************End Ybus Calculations*********************');
+        disp('**********************************************************');
+        disp(' ');
+end
+
+    function displayInitialConditions()
+        disp(' ');
+        disp('**********************************************************');
+        disp('*************Initial Conditions of Buses******************');
+        disp('**********************************************************');
+        disp(' ');
+        disp('Pg Original = ');
+        disp(num2str(Pg));
+        disp(' ');
+        disp('Qg Original = ');
+        disp(num2str(Qg));
+        disp(' ');
+        disp('Pd Original = ');
+        disp(num2str(Pd));
+        disp(' ');
+        disp('Qd Original = ');
+        disp(num2str(Qd));
+        disp(' ');
+        disp('V original = ');
+        disp(num2str(V_mag));
+        disp(' ');
+        disp('Delta in degrees Original = ');
+        disp(num2str(delta));
+        disp(' ');
+        disp('Pg_pu = ');
+        disp(num2str(Pg_pu));
+        disp(' ');
+        disp('Qg_pu = ');
+        disp(num2str(Qg_pu));
+        disp(' ');
+        disp('Pd_pu = ');
+        disp(num2str(Pd_pu));
+        disp(' ');
+        disp('Qd_pu = ');
+        disp(num2str(Qd_pu));
+        disp(' ');
+        disp('V_pu = ');
+        disp(num2str(V_pu));
+        disp(' ');
+        disp('Delta in radians = ');
+        disp(num2str(delta_rad));
+        disp(' ');
+        disp('Unknowns = ');
+        disp(num2str(Unknowns));
+        disp(' ');
+        disp('Bus Types = ');
+        disp(num2str(BusTypes));
+        disp(' ');
+        disp('**********************************************************');
+        disp('************End Initial Conditions of Buses***************');
+        disp('**********************************************************');
+        disp(' ');
+    end
+
+    function displayInitialGuesses()
+        disp(' ');
+        disp('**********************************************************');
+        disp('*******************Initial Guesses************************');
+        disp('**********************************************************');
+        disp(' ');
+        disp('V_pu with Initial Guesses');
+        disp(num2str(V_pu));
+        disp(' ');
+        disp('delta_rad with Initial Guesses');
+        disp(num2str(delta_rad));
+        disp(' ');
+        disp('Qg_pu with Initial Guesses');
+        disp(num2str(Qg_pu));
+        disp(' ');
+        disp('**********************************************************');
+        disp('*****************End Initial Guesses**********************');
+        disp('**********************************************************');
+        disp(' ');
+    end
+
+end
