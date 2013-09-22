@@ -229,18 +229,17 @@ for index = 2 : NumBuses
 end
 
 % Calculate inital Qg for Control Buses
-SummationTerm = 0;
-
 for index = 2 : NumBuses
     if BusTypes(index) == BUSTYPE_Ctrl
+        SummationTerm = 0;
         for k = 1 : NumBuses
             [AngleRad, Mag] = cart2pol(real(Ybus(index, k)), imag(Ybus(index, k)));
             gamma_current = AngleRad;
-            SummationTerm = SummationTerm + Ybus(index, k) * V_pu(k) * sin(delta_rad(k) - delta_rad(index) + gamma_current);
+            y_mag = Mag;
+            SummationTerm = SummationTerm + y_mag * V_pu(k) * sin(delta_rad(k) - delta_rad(index) + gamma_current);
         end
-        
-        [Real_V, Imag_V] = pol2cart(delta_rad(index), V_pu(index));
-        Qg_pu(index) = -(Real_V + Imag_V) * SummationTerm;
+
+        Qg_pu(index) = -V_pu(index) * SummationTerm;
     end
 end
 
@@ -263,7 +262,7 @@ ConvergenceComplete = false;
 while (~ConvergenceComplete)
     % Calculating values for next iteration
     for busIndex = 2 : NumBuses
-        if (~ConvergenceStatus(busIndex))
+        if (ConvergenceStatus(busIndex) == BusNotConverged)
             Pbus = Pg_pu(busIndex) - Pd_pu(busIndex);
             Qbus = Qg_pu(busIndex) - Qd_pu(busIndex);
             y_term = 1 / Ybus(busIndex, busIndex);
@@ -297,12 +296,12 @@ while (~ConvergenceComplete)
                 for k = 1 : NumBuses
                     [AngleRad, Mag] = cart2pol(real(Ybus(busIndex, k)), imag(Ybus(busIndex, k)));
                     gamma_current = AngleRad;
-                    SummationTerm = SummationTerm + Ybus(busIndex, k) * V_pu(k) * sin(delta_rad(k) - delta_rad(busIndex) + gamma_current);
+                    y_mag = Mag;
+                    SummationTerm = SummationTerm + y_mag * V_pu(k) * sin(delta_rad(k) - delta_rad(busIndex) + gamma_current);
                 end
                 
-                [Real_V, Imag_V] = pol2cart(delta_rad(busIndex), V_pu(busIndex));
                 last_Qg = Qg_pu(busIndex);
-                Qg_pu(busIndex) = -(Real_V + Imag_V) * SummationTerm;
+                Qg_pu(busIndex) = -V_pu(busIndex) * SummationTerm;
                 
                 DELTA_Qg = last_Qg - Qg_pu(busIndex);
                 
