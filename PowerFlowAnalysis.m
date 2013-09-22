@@ -1,5 +1,5 @@
 %% Header Section
-% Joshua Hartwig, Christine Martin, Nan XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+% Joshua Hartwig, Christine Martin, Nan Ding
 % Computational Methods of Power Systems
 % Power Flow Analysis
 
@@ -85,7 +85,7 @@ for index = 1 : NumBuses+1
     CurrentYp_pu = CurrentYp * 1600;
     
     CurrentZs = Zl * len * (sinh(Gamma * len) / (Gamma * len));
-    CurrentZs_pu = CurrentZs / 1600;
+    %CurrentZs_pu = CurrentZs / 1600;
     
     CurrentYs = 1 / CurrentZs;
     CurrentYs_pu = CurrentYs * 1600;
@@ -224,7 +224,7 @@ end
 % Make initial guesses for unknonw delta for all buses
 for index = 2 : NumBuses
     if Unknowns(ROW_delta, index) == 1
-        delta_rad(index) = 0;
+        delta_rad(index) = -10 * 2 * pi / 360; % set to -10 degrees
     end
 end
 
@@ -256,6 +256,10 @@ BusNotConverged = 0;
 ConvergenceStatus = zeros(1, NumBuses);
 ConvergenceStatus(1) = BusConverged;
 
+iterToConverge = zeros(1, NumBuses);
+
+ConvergenceCondition = 0.000001;
+
 iterCount = 1;
 ConvergenceComplete = false;
 
@@ -271,20 +275,20 @@ while (~ConvergenceComplete)
             if (BusTypes(busIndex) == BUSTYPE_Ctrl)
                 %%% Calculate delta_rad(u+1)
                 [Real_V, Imag_V] = pol2cart(delta_rad(busIndex), V_pu(busIndex));
-                Current_V_phasor = Real_V + Imag_V;
+                Current_V_phasor = Real_V + 1i * Imag_V;
                 
                 % Calculate Summation Term
                 SummationTerm = 0;
                 for k = 1 : NumBuses
                     if (k ~= busIndex)
                         [Real_V, Imag_V] = pol2cart(delta_rad(k), V_pu(k));
-                        OtherBus_V_phasor = Real_V + Imag_V;
+                        OtherBus_V_phasor = Real_V + 1i * Imag_V;
                         SummationTerm = SummationTerm + Ybus(busIndex, k) * OtherBus_V_phasor;
                     end
                 end
                 
                 new_V_phasor = y_term * ((Pbus - 1i * Qbus) / conj(Current_V_phasor) - SummationTerm);
-                [AngleRad, Mag] = cart2pol(real(new_V_phasor), imag(new_V_phasor));
+                [AngleRad, ~] = cart2pol(real(new_V_phasor), imag(new_V_phasor));
                 last_delta_rad = delta_rad(busIndex);
                 delta_rad(busIndex) = AngleRad;
                 
@@ -306,8 +310,9 @@ while (~ConvergenceComplete)
                 DELTA_Qg = last_Qg - Qg_pu(busIndex);
                 
                 %%% Check Convergence Complete on current bus
-                if ((abs(DELTA_delta) <= 0.001) && (abs(DELTA_Qg) <= 0.001))
+                if ((abs(DELTA_delta) <= ConvergenceCondition) && (abs(DELTA_Qg) <= ConvergenceCondition))
                     ConvergenceStatus(busIndex) = BusConverged;
+                    iterToConverge(busIndex) = iterCount;
                 end
                 
                 % End Control Bus calculations
@@ -316,14 +321,14 @@ while (~ConvergenceComplete)
             elseif (BusTypes(busIndex) == BUSTYPE_Load)
                 %%% Calculate V(u+1) and delta_rad(u+1) simultaneously
                 [Real_V, Imag_V] = pol2cart(delta_rad(busIndex), V_pu(busIndex));
-                Current_V_phasor = Real_V + Imag_V;
+                Current_V_phasor = Real_V + 1i * Imag_V;
                 
                 % Calculate Summation Term
                 SummationTerm = 0;
                 for k = 1 : NumBuses
                     if (k ~= busIndex)
                         [Real_V, Imag_V] = pol2cart(delta_rad(k), V_pu(k));
-                        OtherBus_V_phasor = Real_V + Imag_V;
+                        OtherBus_V_phasor = Real_V + 1i * Imag_V;
                         SummationTerm = SummationTerm + Ybus(busIndex, k) * OtherBus_V_phasor;
                     end
                 end
@@ -338,8 +343,9 @@ while (~ConvergenceComplete)
                 DELTA_V = last_V - V_pu(busIndex);
                 DELTA_delta = last_delta_rad - delta_rad(busIndex);
                 
-                if ((abs(DELTA_V) <= 0.001) && (abs(DELTA_delta) <= 0.001))
+                if ((abs(DELTA_V) <= ConvergenceCondition) && (abs(DELTA_delta) <= ConvergenceCondition))
                     ConvergenceStatus(busIndex) = BusConverged;
+                    iterToConverge(busIndex) = iterCount;
                 end
 
                 % End Load Bus calculations
@@ -361,26 +367,16 @@ while (~ConvergenceComplete)
     end
 end
 
-disp(' ');
-disp('Number of Iterations to convergence');
-disp(num2str(iterCount));
-disp(' ');
-disp('Qg_pu approximations');
-disp(num2str(Qg_pu));
-disp(' ');
-disp('V_pu approximations');
-disp(num2str(V_pu));
-disp(' ');
-disp('delta_rad approximations');
-disp(num2str(delta_rad));
+displayConvergenceResults();
+
+%% Solving Bus 1
+
+
 
 %[AngleRad, Mag] = cart2pol(real(Ybus(1,1)), imag(Ybus(1,1)));
 %AngleDegrees = AngleRad * 360 / (2 * pi);
 %[Real, Imag] = pol2cart(AngleRad, Mag);
-
-
-
-
+%phasor = Real + 1i * Imag;
 
 
 disp(' ');
@@ -549,6 +545,27 @@ end
         disp('*****************End Initial Guesses**********************');
         disp('**********************************************************');
         disp(' ');
+    end
+
+    function displayConvergenceResults()
+        disp(' ');
+        disp('Convergence Condition');
+        disp(num2str(ConvergenceCondition));
+        disp(' ');
+        disp('Number of Iterations for buses to convergence');
+        disp(num2str(iterToConverge));
+        disp(' ');
+        disp('Number of Iterations for whole system to convergence');
+        disp(num2str(iterCount));
+        disp(' ');
+        disp('Qg_pu approximations');
+        disp(num2str(Qg_pu));
+        disp(' ');
+        disp('V_pu approximations');
+        disp(num2str(V_pu));
+        disp(' ');
+        disp('delta_rad approximations');
+        disp(num2str(delta_rad));
     end
 
 end

@@ -1,4 +1,4 @@
->> PowerFlowAnalysis
+PowerFlowAnalysis
 **********************************************************
 ******************Ybus Calculations***********************
 **********************************************************
@@ -12,7 +12,7 @@ Height to Ground
 30
  
 Rl = 
-6.7233e-005
+6.7233e-05
  
 Number of buses = 
 5
@@ -28,7 +28,7 @@ Radius eq
 0.011829
  
 L = 
-1.3731e-006
+1.3731e-06
  
 Omega = 
 376.9911
@@ -37,10 +37,10 @@ Xl =
 0.00051764
  
 Zl = 
-6.7233e-005+0.00051764i
+6.7233e-05+0.00051764i
  
 Epsilon0 = 
-8.85e-012
+8.85e-12
  
 Height to conductor reflections = 
 60
@@ -55,13 +55,13 @@ H31 =
 62.6418
  
 Cn = 
-8.4333e-012
+8.4333e-12
  
 Yl = 
-0+3.1793e-009i
+0+3.1793e-09i
  
 Gamma = 
-8.3136e-008+1.2855e-006i
+8.3136e-08+1.2855e-06i
  
 Incidence Matrix = 
 1  1  0  0  0  0  0  0  0  0  1  1  0  0  0  0  1  1
@@ -174,11 +174,33 @@ V_pu with Initial Guesses
 1      0.9875         0.9         0.9         0.9
  
 delta_rad with Initial Guesses
-0  0  0  0  0
+0    -0.17453    -0.17453    -0.17453    -0.17453
  
 Qg_pu with Initial Guesses
-99999    -0.876295867               0               0               0
+99999    -0.548183348               0               0               0
  
 **********************************************************
 *****************End Initial Guesses**********************
 **********************************************************
+ 
+ 
+Convergence Condition
+1e-06
+ 
+Number of Iterations for buses to convergence
+0  39  37  37  36
+ 
+Number of Iterations for whole system to convergence
+39
+ 
+Qg_pu approximations
+99999    -0.173009598               0               0               0
+ 
+V_pu approximations
+1      0.9875     0.84114     0.87919     0.82904
+ 
+delta_rad approximations
+0   -0.042831    -0.33667    -0.30636      -0.345
+ 
+XXXXXXXXXXX
+Program End
