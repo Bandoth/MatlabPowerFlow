@@ -21,7 +21,7 @@ H_toGround = 30;            % conductor height above ground in meters
 NumBuses = 5;               % Number of buses in the circuit
 % Bus distances in meters in 2nd row.  1st row for names unused.  Must be
 % in same order as incidence matrix.
-BusDistances = [12,     23,     34,     41,     45,     51;
+BusDistances = [12,     23,     34,     14,     45,     15;
                 350000, 305000, 250000, 290000, 300000, 320000];
             
 Sbase = 100;    % Sbase in MVA
@@ -228,7 +228,8 @@ for index = 2 : NumBuses
     end
 end
 
-% Calculate inital Qg for Control Buses
+% Calculate inital Q for Control Buses
+Q_estimate = zeros(1, NumBuses);
 for index = 2 : NumBuses
     if BusTypes(index) == BUSTYPE_Ctrl
         SummationTerm = 0;
@@ -239,7 +240,7 @@ for index = 2 : NumBuses
             SummationTerm = SummationTerm + y_mag * V_pu(k) * sin(delta_rad(k) - delta_rad(index) + gamma_current);
         end
 
-        Qg_pu(index) = -V_pu(index) * SummationTerm;
+        Q_estimate(index) = -V_pu(index) * SummationTerm;
     end
 end
 
@@ -273,7 +274,11 @@ while (~ConvergenceComplete)
             
             %%% Control Bus Calculations
             if (BusTypes(busIndex) == BUSTYPE_Ctrl)
-                %%% Calculate delta_rad(u+1)
+                % Update Qbus with control bus estimate from previous
+                % iteration
+                Qbus = Q_estimate(busIndex);
+                
+                % Calculate delta_rad(u+1)
                 [Real_V, Imag_V] = pol2cart(delta_rad(busIndex), V_pu(busIndex));
                 Current_V_phasor = Real_V + 1i * Imag_V;
                 
@@ -294,7 +299,7 @@ while (~ConvergenceComplete)
                 
                 DELTA_delta = last_delta_rad - delta_rad(busIndex);
                 
-                %%% Calculate Q(u+1)
+                % Calculate Q(u+1)
                 % Calculate Summation Term
                 SummationTerm = 0;
                 for k = 1 : NumBuses
@@ -304,13 +309,14 @@ while (~ConvergenceComplete)
                     SummationTerm = SummationTerm + y_mag * V_pu(k) * sin(delta_rad(k) - delta_rad(busIndex) + gamma_current);
                 end
                 
-                last_Qg = Qg_pu(busIndex);
-                Qg_pu(busIndex) = -V_pu(busIndex) * SummationTerm;
+                last_Qestimate = Q_estimate(busIndex);
+                Q_estimate(busIndex) = -V_pu(busIndex) * SummationTerm;
                 
-                DELTA_Qg = last_Qg - Qg_pu(busIndex);
+                DELTA_Qg = last_Qestimate - Q_estimate(busIndex);
                 
-                %%% Check Convergence Complete on current bus
+                % Check Convergence Complete on current bus
                 if ((abs(DELTA_delta) <= ConvergenceCondition) && (abs(DELTA_Qg) <= ConvergenceCondition))
+                    Qg_pu(busIndex) = Q_estimate(busIndex) + Qd_pu(busIndex);
                     ConvergenceStatus(busIndex) = BusConverged;
                     iterToConverge(busIndex) = iterCount;
                 end
@@ -319,7 +325,7 @@ while (~ConvergenceComplete)
                 
             %%% Load Bus Calculations
             elseif (BusTypes(busIndex) == BUSTYPE_Load)
-                %%% Calculate V(u+1) and delta_rad(u+1) simultaneously
+                % Calculate V(u+1) and delta_rad(u+1) simultaneously
                 [Real_V, Imag_V] = pol2cart(delta_rad(busIndex), V_pu(busIndex));
                 Current_V_phasor = Real_V + 1i * Imag_V;
                 
@@ -343,6 +349,7 @@ while (~ConvergenceComplete)
                 DELTA_V = last_V - V_pu(busIndex);
                 DELTA_delta = last_delta_rad - delta_rad(busIndex);
                 
+                % Check Convergence Complete on current bus
                 if ((abs(DELTA_V) <= ConvergenceCondition) && (abs(DELTA_delta) <= ConvergenceCondition))
                     ConvergenceStatus(busIndex) = BusConverged;
                     iterToConverge(busIndex) = iterCount;
@@ -354,7 +361,7 @@ while (~ConvergenceComplete)
         end
     end
     
-    % Check if final iteration complete
+    %%% Check if final iteration complete
     ConvergenceComplete = true;
     for convergeCounter = 1 : NumBuses
         if (ConvergenceStatus(convergeCounter) == BusNotConverged)
@@ -369,8 +376,76 @@ end
 
 displayConvergenceResults();
 
-%% Solving Bus 1
+%% Power Flows
 
+[~, NumColumns] = size(YpYsMat);
+YpYsMatSize = NumColumns;
+Sbuses = zeros(NumBuses);
+
+for i = 1 : NumBuses
+    [Real, Imag] = pol2cart(delta_rad(i), V_pu(i));
+    Vi_phasor = Real + 1i * Imag;
+
+    for k = 1 : NumBuses
+        [Real, Imag] = pol2cart(delta_rad(k), V_pu(k));
+        Vk_phasor = Real + 1i * Imag;
+        
+        % Find correct Yp and Ys
+        busCombination = i * 10 + k + 0i;
+        busCombination2 = k * 10 + i + 0i;
+        for j = 1 : YpYsMatSize
+            if ((busCombination == YpYsMat(1, j)) || (busCombination2 == YpYsMat(1, j)))
+                Yp_ik = YpYsMat(2, j);
+                Ys_ik = YpYsMat(3, j);
+                
+                Sbuses(i, k) = Vi_phasor * (conj(Vi_phasor) - conj(Vk_phasor)) * conj(Ys_ik) + conj(Yp_ik) * V_pu(i)^2;
+            end
+        end
+    end
+end
+
+Pg1_sum = 0;
+Qg1_sum = 0;
+for i = 1 : NumBuses
+    Pg1_sum = Pg1_sum + real(Sbuses(1, i));
+    Qg1_sum = Qg1_sum + imag(Sbuses(1, i));
+end
+
+Pg_pu(1) = Pg1_sum;
+Qg_pu(1) = Qg1_sum;
+
+disp(' ');
+disp('Sbuses = ');
+disp(num2str(Sbuses));
+disp(' ');
+disp('Pg_pu = ');
+disp(num2str(Pg_pu));
+disp(' ');
+disp('Qg_pu = ');
+disp(num2str(Qg_pu));
+
+
+%% Power Losses
+
+Plosses = zeros(NumBuses);
+Qlosses = zeros(NumBuses);
+
+for i = 1 : NumBuses
+    for k = 1 : NumBuses
+        Plosses(i, k) = real(Sbuses(i, k)) + real(Sbuses(k, i));
+        Qlosses(i, k) = imag(Sbuses(i, k)) + imag(Sbuses(k, i));
+    end
+end
+
+disp(' ');
+disp('Plosses = ');
+disp(num2str(Plosses));
+disp(' ');
+disp('Qlosses = ');
+disp(num2str(Qlosses));
+
+
+%% Net Power Checks
 
 
 %[AngleRad, Mag] = cart2pol(real(Ybus(1,1)), imag(Ybus(1,1)));
@@ -549,6 +624,10 @@ end
 
     function displayConvergenceResults()
         disp(' ');
+        disp('**********************************************************');
+        disp('*****************Convergence Results**********************');
+        disp('**********************************************************');
+        disp(' ');
         disp('Convergence Condition');
         disp(num2str(ConvergenceCondition));
         disp(' ');
@@ -566,6 +645,17 @@ end
         disp(' ');
         disp('delta_rad approximations');
         disp(num2str(delta_rad));
+        disp(' ');
+        
+        delta_degrees_local = delta_rad ./ (2 * pi) .* 360;
+        disp('delta approximations in degrees');
+        disp(num2str(delta_degrees_local));
+        disp(' ');
+        
+        disp('**********************************************************');
+        disp('***************End Convergence Results********************');
+        disp('**********************************************************');
+        disp(' ');
     end
 
 end
